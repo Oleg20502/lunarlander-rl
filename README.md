@@ -117,11 +117,11 @@ $$L = L^{\text{CLIP}} + c_v L^{\text{value}} - c_e H[\pi] + \beta_{\text{KL}} \,
 
 ### GRPO (Group Relative Policy Optimization)
 
-Implemented in `src/grpo.py`. Like PPO but **without a value network**. Advantages are Monte-Carlo returns normalized across the rollout batch (the "group"):
+Implemented in `src/grpo.py`. Like PPO but **without a value network**. For each initial state $s_0$, $G$ complete episodes are sampled from $\pi_{\theta_\text{old}}$. The total (undiscounted) episode returns are normalized **within each group** to form the advantage:
 
-$$A_t = \frac{G_t - \mu_G}{\sigma_G + \varepsilon}$$
+$$\hat{A}_i = \frac{R_i - \frac{1}{G}\sum_{j=1}^G R_j}{\text{std}(R_1, \ldots, R_G) + \varepsilon}$$
 
-Uses the same clipped surrogate objective as PPO but relies solely on group normalization instead of a learned baseline.
+This advantage is **constant for all timesteps** within episode $i$. All groups run in parallel via a single vectorized environment of size `n_groups × group_size`. Uses the same clipped surrogate objective as PPO.
 
 ---
 
@@ -152,7 +152,7 @@ lunarlander-rl/
 |------|-------------------|---------|
 | `src/reinforce.py` | `NeuralPolicy`, `ValueNetwork`, `compute_returns`, `compute_gae`, `train_reinforce` | Policy and value network definitions (shared by all algorithms), REINFORCE training with 4 baseline modes |
 | `src/ppo.py` | `compute_gae_buffer`, `train_ppo` | PPO training with clipped surrogate, GAE, optional KL penalty |
-| `src/grpo.py` | `compute_mc_buffer`, `train_grpo` | GRPO training — value-free PPO-style with group-normalized MC returns |
+| `src/grpo.py` | `train_grpo` | GRPO training — value-free PPO-style with per-group normalized episode returns |
 | `src/eval.py` | `evaluate_policy`, `_load_policy` | Load a saved checkpoint, run evaluation episodes, compute metrics, save GIF |
 
 ---
@@ -217,9 +217,9 @@ CUDA_VISIBLE_DEVICES=0 python src/ppo.py \
 ```bash
 CUDA_VISIBLE_DEVICES=0 python src/grpo.py \
   --n-iter            500       \
-  --num-envs          64        \
+  --n-groups          32        \
+  --group-size        16        \
   --alpha             3e-4      \
-  --gamma             0.99      \
   --entropy-coef      0.01      \
   --hidden-size       1024      \
   --seed              42        \

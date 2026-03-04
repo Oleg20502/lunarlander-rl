@@ -10,38 +10,17 @@ import argparse
 from reinforce import NeuralPolicy
 
 
-def compute_mc_buffer(rewards, dones, gamma=0.99):
-    """
-    MC returns for a rollout buffer respecting episode boundaries.
-
-    rewards, dones : [T, num_envs] tensors
-    Returns returns : [T, num_envs]
-
-    When done[t] = 1, the episode ended at step t, so future rewards
-    from the next episode are masked out via (1 - done[t]).
-    """
-    T = rewards.shape[0]
-    returns = torch.zeros_like(rewards)
-    G = torch.zeros(rewards.shape[1], device=rewards.device)
-    for t in reversed(range(T)):
-        G = rewards[t] + gamma * G * (1.0 - dones[t])
-        returns[t] = G
-    return returns
-
-
 def train_grpo(
     env_maker,
     n_iter=300,
-    n_steps=512,
-    num_envs=8,
+    n_groups=32,
+    group_size=16,
     n_epochs=10,
     batch_size=64,
     alpha=3e-4,
-    gamma=0.99,
     clip_eps=0.2,
     entropy_coef=0.01,
     max_grad_norm=0.5,
-    use_advantage_norm=True,
     adv_eps=1e-8,
     hidden_size=128,
     device='cpu',
@@ -49,6 +28,11 @@ def train_grpo(
     exp_dir=None,
     save_every_n=50,
 ):
+    """
+    Vectorized GRPO: all n_groups × group_size episodes run in parallel.
+    Per group, envs share the same initial state (seed). Returns are
+    normalized within each group to produce the group-relative advantage.
+    """
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)
@@ -66,7 +50,8 @@ def train_grpo(
         with open(metrics_path, 'w', newline='') as f:
             csv.DictWriter(f, fieldnames=_CSV_FIELDS).writeheader()
 
-    envs = gym.vector.SyncVectorEnv([env_maker for _ in range(num_envs)], copy=False)
+    total_envs = n_groups * group_size
+    envs = gym.vector.SyncVectorEnv([env_maker for _ in range(total_envs)], copy=False)
     n_features = envs.single_observation_space.shape[0]
     n_actions  = envs.single_action_space.n
 
@@ -77,61 +62,66 @@ def train_grpo(
     best_return       = -np.inf
     best_policy_state = None
 
-    obs, _ = envs.reset(seed=seed)
-    obs = torch.FloatTensor(obs).to(device)
-
     pbar = tqdm(range(n_iter), desc="Train Iter...")
 
     for iteration in pbar:
+        seeds = []
+        for _ in range(n_groups):
+            s = int(np.random.randint(0, 2**31))
+            seeds.extend([s] * group_size)
+
+        obs, _ = envs.reset(seed=seeds)
+        obs = torch.FloatTensor(obs).to(device)
+
+        active      = torch.ones(total_envs, dtype=torch.bool, device=device)
+        env_returns = torch.zeros(total_envs, device=device)
+
         obs_buf  = []
         act_buf  = []
-        rew_buf  = []
-        done_buf = []
         logp_buf = []
-        episode_returns = []
-        ep_reward_accum = np.zeros(num_envs)
+        mask_buf = []
 
-        # --- Rollout ---
-        for _ in range(n_steps):
+        while active.any():
             with torch.no_grad():
-                dist      = policy.get_dist(obs)
-                actions   = dist.sample()
-                log_probs = dist.log_prob(actions)
+                dist    = policy.get_dist(obs)
+                actions = dist.sample()
+                logps   = dist.log_prob(actions)
 
             next_obs, rewards, terminated, truncated, _ = envs.step(actions.cpu().numpy())
-            dones = terminated | truncated
+            dones_np = terminated | truncated
 
-            obs_buf.append(obs.clone())
+            obs_buf.append(obs)
             act_buf.append(actions)
-            rew_buf.append(torch.FloatTensor(rewards).to(device))
-            done_buf.append(torch.FloatTensor(dones.astype(float)).to(device))
-            logp_buf.append(log_probs)
+            logp_buf.append(logps)
+            mask_buf.append(active.clone())
 
-            ep_reward_accum += rewards
-            for i in range(num_envs):
-                if dones[i]:
-                    episode_returns.append(float(ep_reward_accum[i]))
-                    ep_reward_accum[i] = 0.0
+            rewards_t = torch.tensor(rewards, dtype=torch.float32, device=device)
+            dones_t   = torch.tensor(dones_np, dtype=torch.bool, device=device)
+
+            env_returns += rewards_t * active.float()
+            active = active & ~dones_t
 
             obs = torch.FloatTensor(next_obs).to(device)
 
-        obs_t  = torch.stack(obs_buf)   # [T, num_envs, n_features]
-        act_t  = torch.stack(act_buf)   # [T, num_envs]
-        rew_t  = torch.stack(rew_buf)   # [T, num_envs]
-        done_t = torch.stack(done_buf)  # [T, num_envs]
-        logp_t = torch.stack(logp_buf)  # [T, num_envs]
+        obs_all  = torch.stack(obs_buf)    # [T, total_envs, n_features]
+        act_all  = torch.stack(act_buf)    # [T, total_envs]
+        logp_all = torch.stack(logp_buf)   # [T, total_envs]
+        mask_all = torch.stack(mask_buf)   # [T, total_envs]
 
-        adv_t = compute_mc_buffer(rew_t, done_t, gamma)
+        ret_grouped = env_returns.view(n_groups, group_size)
+        grp_mean = ret_grouped.mean(dim=1, keepdim=True)
+        grp_std  = ret_grouped.std(dim=1, keepdim=True) + adv_eps
+        adv_per_env = ((ret_grouped - grp_mean) / grp_std).view(-1)   # [total_envs]
+        adv_all = adv_per_env.unsqueeze(0).expand_as(act_all)         # [T, total_envs]
 
-        # Flatten to [T * num_envs]
-        B = n_steps * num_envs
-        obs_flat  = obs_t.view(B, n_features)
-        act_flat  = act_t.view(B)
-        logp_flat = logp_t.view(B)
-        adv_flat  = adv_t.view(B)
+        valid     = mask_all
+        obs_flat  = obs_all[valid]    # [B, n_features]
+        act_flat  = act_all[valid]    # [B]
+        logp_flat = logp_all[valid]   # [B]
+        adv_flat  = adv_all[valid]    # [B]
 
-        if use_advantage_norm:
-            adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + adv_eps)
+        B = obs_flat.shape[0]
+        episode_returns = env_returns.cpu().numpy()
 
         total_policy_loss = 0.0
         total_entropy     = 0.0
@@ -169,7 +159,7 @@ def train_grpo(
         avg_policy_loss = total_policy_loss / n_updates
         avg_entropy     = total_entropy     / n_updates
 
-        mean_ret = float(np.mean(episode_returns)) if episode_returns else float('nan')
+        mean_ret = float(episode_returns.mean())
         if mean_ret > best_return:
             best_return       = mean_ret
             best_policy_state = {k: v.cpu().clone() for k, v in policy.state_dict().items()}
@@ -188,9 +178,9 @@ def train_grpo(
                 'best_return':   round(best_return, 4),
                 'policy_loss':   round(avg_policy_loss, 6),
                 'entropy':       round(avg_entropy, 6),
-                'ep_return_std': round(float(np.std(episode_returns)), 4) if len(episode_returns) > 1 else 0.0,
-                'ep_return_min': round(float(np.min(episode_returns)), 4) if episode_returns else float('nan'),
-                'ep_return_max': round(float(np.max(episode_returns)), 4) if episode_returns else float('nan'),
+                'ep_return_std': round(float(episode_returns.std()), 4),
+                'ep_return_min': round(float(episode_returns.min()), 4),
+                'ep_return_max': round(float(episode_returns.max()), 4),
             }
             with open(metrics_path, 'a', newline='') as f:
                 csv.DictWriter(f, fieldnames=_CSV_FIELDS).writerow(step_metrics)
@@ -216,16 +206,14 @@ def train_grpo(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n-iter",            type=int,   default=300)
-    parser.add_argument("--n-steps",           type=int,   default=512)
-    parser.add_argument("--num-envs",          type=int,   default=8)
+    parser.add_argument("--n-groups",          type=int,   default=32)
+    parser.add_argument("--group-size",        type=int,   default=16)
     parser.add_argument("--n-epochs",          type=int,   default=10)
     parser.add_argument("--batch-size",        type=int,   default=64)
     parser.add_argument("--alpha",             type=float, default=3e-4)
-    parser.add_argument("--gamma",             type=float, default=0.99)
     parser.add_argument("--clip-eps",          type=float, default=0.2)
     parser.add_argument("--entropy-coef",      type=float, default=0.01)
     parser.add_argument("--max-grad-norm",     type=float, default=0.5)
-    parser.add_argument("--no-advantage-norm", action="store_true")
     parser.add_argument("--hidden-size",       type=int,   default=128)
     parser.add_argument("--seed",              type=int,   default=42)
     parser.add_argument("--exp-dir",           type=str,   default="runs/grpo_exp_001")
@@ -252,16 +240,14 @@ if __name__ == "__main__":
     policy, returns = train_grpo(
         env_maker=make_env,
         n_iter=args.n_iter,
-        n_steps=args.n_steps,
-        num_envs=args.num_envs,
+        n_groups=args.n_groups,
+        group_size=args.group_size,
         n_epochs=args.n_epochs,
         batch_size=args.batch_size,
         alpha=args.alpha,
-        gamma=args.gamma,
         clip_eps=args.clip_eps,
         entropy_coef=args.entropy_coef,
         max_grad_norm=args.max_grad_norm,
-        use_advantage_norm=not args.no_advantage_norm,
         hidden_size=args.hidden_size,
         device=device,
         seed=args.seed,
