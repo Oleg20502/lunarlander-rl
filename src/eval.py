@@ -1,5 +1,4 @@
 import argparse
-import importlib.util
 import json
 import os
 import numpy as np
@@ -15,11 +14,6 @@ from reinforce import NeuralPolicy
 
 @torch.no_grad()
 def evaluate_policy(env, policy, n_episodes=10, device='cpu', deterministic=False, gif_path=None):
-    """Evaluate policy over n_episodes, return summary statistics.
-
-    If gif_path is set, env must be created with render_mode='rgb_array'.
-    Frames are captured from the same env that produces rewards.
-    """
     returns = []
     successes = 0
     saved_gif = False
