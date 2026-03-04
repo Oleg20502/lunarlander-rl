@@ -15,23 +15,20 @@ from reinforce import NeuralPolicy
 
 @torch.no_grad()
 def evaluate_policy(env, policy, n_episodes=10, device='cpu', deterministic=False, gif_path=None):
-    """Evaluate policy over n_episodes, return summary statistics."""
+    """Evaluate policy over n_episodes, return summary statistics.
+
+    If gif_path is set, env must be created with render_mode='rgb_array'.
+    Frames are captured from the same env that produces rewards.
+    """
     returns = []
+    successes = 0
     saved_gif = False
     last_frames = None
-
-    render_env = None
-    if gif_path is not None:
-        render_env = gym.make("LunarLander-v3", continuous=False, render_mode="rgb_array")
 
     for ep in tqdm(range(n_episodes), desc="Evaluate Episodes..."):
         obs, _ = env.reset()
         total, terminated, truncated = 0.0, False, False
         frames = []
-
-        # Mirror episode in render_env using the same actions
-        if render_env is not None and not saved_gif:
-            render_env.reset()
 
         while not (terminated or truncated):
             obs_t = torch.FloatTensor(obs).unsqueeze(0).to(device)
@@ -42,30 +39,30 @@ def evaluate_policy(env, policy, n_episodes=10, device='cpu', deterministic=Fals
             obs, reward, terminated, truncated, _ = env.step(action)
             total += reward
 
-            if render_env is not None and not saved_gif:
-                render_env.step(action)
-                frames.append(render_env.render())
+            if gif_path is not None and not saved_gif:
+                frames.append(env.render())
 
         returns.append(total)
+        if total >= 200:
+            successes += 1
 
-        if render_env is not None and not saved_gif:
+        if gif_path is not None and not saved_gif:
             last_frames = frames
             if total >= 200:
                 imageio.mimsave(gif_path, last_frames, fps=30)
                 print(f"GIF saved (successful, ep {ep+1}, reward={total:.1f}): {gif_path}")
                 saved_gif = True
 
-    if render_env is not None:
-        if not saved_gif and last_frames:
-            imageio.mimsave(gif_path, last_frames, fps=30)
-            print(f"GIF saved (last episode, reward={returns[-1]:.1f}): {gif_path}")
-        render_env.close()
+    if gif_path is not None and not saved_gif and last_frames:
+        imageio.mimsave(gif_path, last_frames, fps=30)
+        print(f"GIF saved (last episode, reward={returns[-1]:.1f}): {gif_path}")
 
     return {
-        'mean': float(np.mean(returns)),
-        'std':  float(np.std(returns)),
-        'min':  float(np.min(returns)),
-        'max':  float(np.max(returns)),
+        'mean':         float(np.mean(returns)),
+        'std':          float(np.std(returns)),
+        'min':          float(np.min(returns)),
+        'max':          float(np.max(returns)),
+        'success_rate': successes / n_episodes,
     }
 
 
@@ -99,16 +96,23 @@ if __name__ == "__main__":
     )
     print(f"Using device: {device}")
 
-    env = gym.make("LunarLander-v3", continuous=False, render_mode=None, enable_wind=False)
-
-    policy = _load_policy(args.checkpoint, device)
-    print(f"Loaded policy from: {args.checkpoint}")
-
     os.makedirs(args.results_dir, exist_ok=True)
     ckpt_stem = os.path.splitext(os.path.basename(args.checkpoint))[0]
     out_path  = os.path.join(args.results_dir, f"{ckpt_stem}.json")
+    gif_path  = args.gif if args.gif else os.path.join(args.results_dir, f"{ckpt_stem}.gif")
 
-    gif_path = args.gif if args.gif else os.path.join(args.results_dir, f"{ckpt_stem}.gif")
+    env = gym.make(
+        "LunarLander-v3",
+        continuous=False,
+        gravity=-10.0,
+        enable_wind=False,
+        wind_power=15.0,
+        turbulence_power=1.5,
+        render_mode="rgb_array" if gif_path else None,
+    )
+
+    policy = _load_policy(args.checkpoint, device)
+    print(f"Loaded policy from: {args.checkpoint}")
 
     results = evaluate_policy(
         env, policy,
@@ -127,6 +131,5 @@ if __name__ == "__main__":
     }
     with open(out_path, 'w') as f:
         json.dump(payload, f, indent=2)
-    print(f"Results saved to: {out_path}")
 
     env.close()

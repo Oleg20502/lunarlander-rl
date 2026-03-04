@@ -281,10 +281,10 @@ def train_reinforce(
             with open(metrics_path, 'a', newline='') as f:
                 csv.DictWriter(f, fieldnames=_CSV_FIELDS).writerow(step_metrics)
 
-            if (iteration + 1) % save_every_n == 0:
+            if (iteration + 1) % save_every_n == 0 and best_policy_state is not None:
                 ckpt = {
                     'iteration':    iteration,
-                    'policy':       {k: v.cpu() for k, v in policy.state_dict().items()},
+                    'policy':       best_policy_state,
                     'optimizer':    optimizer.state_dict(),
                 }
                 if use_value_net:
