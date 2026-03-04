@@ -1,0 +1,13 @@
+{
+  "checkpoint": "/home/jovyan/avarlamov/skoltech/lunarlander-rl/runs/ppo_exp_001_500/checkpoints/ckpt_iter_0040_best_return_231.80.pt",
+  "n_episodes": 100,
+  "deterministic": false,
+  "device": "cuda",
+  "results": {
+    "mean": 273.8444104486916,
+    "std": 35.26772377614961,
+    "min": 57.51382082832376,
+    "max": 319.4131549174532,
+    "success_rate": 0.98
+  }
+}

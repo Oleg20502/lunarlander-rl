@@ -120,6 +120,7 @@ def train_reinforce(
             csv.DictWriter(f, fieldnames=_CSV_FIELDS).writeheader()
 
     envs = gym.vector.SyncVectorEnv([env_maker for _ in range(num_envs)], copy=False)
+
     n_features = envs.single_observation_space.shape[0]
     n_actions  = envs.single_action_space.n
 
@@ -281,10 +282,10 @@ def train_reinforce(
             with open(metrics_path, 'a', newline='') as f:
                 csv.DictWriter(f, fieldnames=_CSV_FIELDS).writerow(step_metrics)
 
-            if (iteration + 1) % save_every_n == 0:
+            if (iteration + 1) % save_every_n == 0 and best_policy_state is not None:
                 ckpt = {
                     'iteration':    iteration,
-                    'policy':       {k: v.cpu() for k, v in policy.state_dict().items()},
+                    'policy':       best_policy_state,
                     'optimizer':    optimizer.state_dict(),
                 }
                 if use_value_net:
@@ -339,7 +340,6 @@ if __name__ == "__main__":
             render_mode=None,
         )
 
-    eval_env = make_env()
     policy, returns = train_reinforce(
         env_maker=make_env,
         n_iter=args.n_iter,
@@ -359,5 +359,3 @@ if __name__ == "__main__":
         exp_dir=args.exp_dir,
         save_every_n=args.save_every_n,
     )
-
-    eval_env.close()
