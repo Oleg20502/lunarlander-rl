@@ -49,10 +49,6 @@ def train_grpo(
     exp_dir=None,
     save_every_n=50,
 ):
-    """
-    No value network. Advantages are MC returns normalized across the rollout batch (group):
-        A = (G - mean(G)) / (std(G) + eps)
-    """
     if seed is not None:
         np.random.seed(seed)
         torch.manual_seed(seed)

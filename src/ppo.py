@@ -154,7 +154,6 @@ def train_ppo(
         if use_advantage_norm:
             adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + adv_eps)
 
-        # --- PPO update epochs ---
         total_policy_loss = 0.0
         total_value_loss  = 0.0
         total_entropy     = 0.0
