@@ -1,0 +1,13 @@
+{
+  "checkpoint": "/home/jovyan/avarlamov/skoltech/lunarlander-rl/runs/grpo_fixed_groups_v2/checkpoints/ckpt_iter_0100_best_return_165.67.pt",
+  "n_episodes": 100,
+  "deterministic": false,
+  "device": "cuda",
+  "results": {
+    "mean": 144.89697999705243,
+    "std": 88.03445310255928,
+    "min": -372.1755041421894,
+    "max": 276.9518851137922,
+    "success_rate": 0.1
+  }
+}
