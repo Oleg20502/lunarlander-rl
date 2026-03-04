@@ -109,11 +109,11 @@ All variants support entropy regularization (`--entropy-coef`) and advantage nor
 
 Implemented in `src/ppo.py`.
 
-$$L^{\text{CLIP}} = -\mathbb{E}\left[\min\left(r_t(\theta)\hat{A}_t,\; \text{clip}(r_t(\theta), 1-\varepsilon, 1+\varepsilon)\hat{A}_t\right)\right]$$
+$$L^{\text{CLIP}} = -\mathbb{\hat{E_t}}\left[\min\left(r_t(\theta)\hat{A}_t,\ \text{clip}(r_t(\theta), 1-\varepsilon, 1+\varepsilon)\hat{A}_t\right)\right]$$
 
 Supports an optional KL-divergence penalty (`--beta-kl`) for additional policy regularization:
 
-$$L = L^{\text{CLIP}} + c_v L^{\text{value}} - c_e H[\pi] + \beta_{\text{KL}} \, D_{\text{KL}}(\pi_{\text{old}} \| \pi)$$
+$$L = L^{\text{CLIP}} + c_v L^{\text{value}} - c_e H[\pi] + \beta_{\text{KL}} D_{\text{KL}}(\pi_{\text{old}} \| \pi)$$
 
 ### GRPO (Group Relative Policy Optimization)
 
