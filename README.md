@@ -45,6 +45,7 @@ This project implements and compares three policy-gradient algorithms — **REIN
 - **Engines:** Main engine: vertical thrust; side engines: thrust + torque (orientation-dependent per implementation). Discrete: on/off.
 - **Wind (optional):** If `enable_wind=True`, wind uses  
   `tanh(sin(2k(t+C)) + sin(πk(t+C)))` with `k=0.01`, `C` random in [-9999, 9999] at reset; `wind_power` and `turbulence_power` scale linear and rotational wind.
+  - Remark: We did not use wind in our Project
 
 So: **next state = physics(state, action, gravity, wind)** (Box2D step).
 
@@ -268,6 +269,8 @@ Batch evaluation examples are provided in `scripts/eval.sh`.
 ## Results
 
 ### Quantitative comparison
+
+- Evaluation performed over 100 sampled trajectories:
 
 | Algorithm | Mean Return | Success Rate |
 |-----------|------------|--------------|

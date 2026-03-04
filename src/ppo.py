@@ -280,6 +280,8 @@ if __name__ == "__main__":
     parser.add_argument("--exp-dir",           type=str,   default="runs/ppo_exp_001")
     parser.add_argument("--save-every-n",      type=int,   default=50)
     parser.add_argument("--device",            type=str,   default=None)
+
+    parser.add_argument("--enable_wind",        action="store_true")
     args = parser.parse_args()
 
     device = torch.device(
@@ -292,7 +294,7 @@ if __name__ == "__main__":
             "LunarLander-v3",
             continuous=False,
             gravity=-10.0,
-            enable_wind=False,
+            enable_wind=args.enable_wind,
             wind_power=15.0,
             turbulence_power=1.5,
             render_mode=None,

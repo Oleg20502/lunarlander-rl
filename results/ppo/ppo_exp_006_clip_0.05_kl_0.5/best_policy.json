@@ -1,0 +1,13 @@
+{
+  "checkpoint": "/home/jovyan/avarlamov/skoltech/lunarlander-rl/runs/ppo_exp_006_clip_0.05_kl_0.5/best_policy.pt",
+  "n_episodes": 100,
+  "deterministic": false,
+  "device": "cuda",
+  "results": {
+    "mean": 285.6238105009734,
+    "std": 32.160708058044875,
+    "min": 20.218453596649425,
+    "max": 328.9834560239175,
+    "success_rate": 0.99
+  }
+}
