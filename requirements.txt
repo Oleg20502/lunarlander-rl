@@ -7,3 +7,4 @@ box2d
 pygame
 matplotlib
 tqdm
+pandas

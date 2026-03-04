@@ -120,6 +120,7 @@ def train_reinforce(
             csv.DictWriter(f, fieldnames=_CSV_FIELDS).writeheader()
 
     envs = gym.vector.SyncVectorEnv([env_maker for _ in range(num_envs)], copy=False)
+
     n_features = envs.single_observation_space.shape[0]
     n_actions  = envs.single_action_space.n
 
@@ -339,7 +340,6 @@ if __name__ == "__main__":
             render_mode=None,
         )
 
-    eval_env = make_env()
     policy, returns = train_reinforce(
         env_maker=make_env,
         n_iter=args.n_iter,
@@ -359,5 +359,3 @@ if __name__ == "__main__":
         exp_dir=args.exp_dir,
         save_every_n=args.save_every_n,
     )
-
-    eval_env.close()

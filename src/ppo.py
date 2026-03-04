@@ -6,6 +6,7 @@ import gymnasium as gym
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.distributions import Categorical, kl_divergence
 import argparse
 
 from reinforce import NeuralPolicy, ValueNetwork
@@ -47,6 +48,7 @@ def train_ppo(
     clip_eps=0.2,
     entropy_coef=0.01,
     value_coef=0.5,
+    beta_kl=0.0,
     max_grad_norm=0.5,
     use_advantage_norm=True,
     adv_eps=1e-8,
@@ -67,7 +69,7 @@ def train_ppo(
         metrics_path = os.path.join(exp_dir, "metrics.csv")
         _CSV_FIELDS = [
             'iteration', 'mean_return', 'best_return',
-            'policy_loss', 'value_loss', 'entropy',
+            'policy_loss', 'value_loss', 'entropy', 'kl',
             'ep_return_std', 'ep_return_min', 'ep_return_max',
         ]
         with open(metrics_path, 'w', newline='') as f:
@@ -91,12 +93,13 @@ def train_ppo(
     pbar = tqdm(range(n_iter), desc="Train Iter...")
 
     for iteration in pbar:
-        obs_buf  = []
-        act_buf  = []
-        rew_buf  = []
-        done_buf = []
-        logp_buf = []
-        val_buf  = []
+        obs_buf    = []
+        act_buf    = []
+        rew_buf    = []
+        done_buf   = []
+        logp_buf   = []
+        val_buf    = []
+        logits_buf = []
         episode_returns = []
         ep_reward_accum = np.zeros(num_envs)
 
@@ -116,6 +119,7 @@ def train_ppo(
             done_buf.append(torch.FloatTensor(dones.astype(float)).to(device))
             logp_buf.append(log_probs)
             val_buf.append(values)
+            logits_buf.append(dist.logits)
 
             ep_reward_accum += rewards
             for i in range(num_envs):
@@ -128,12 +132,13 @@ def train_ppo(
         with torch.no_grad():
             last_values = value_net(obs)
 
-        obs_t  = torch.stack(obs_buf)   # [T, num_envs, n_features]
-        act_t  = torch.stack(act_buf)   # [T, num_envs]
-        rew_t  = torch.stack(rew_buf)   # [T, num_envs]
-        done_t = torch.stack(done_buf)  # [T, num_envs]
-        logp_t = torch.stack(logp_buf)  # [T, num_envs]
-        val_t  = torch.stack(val_buf)   # [T, num_envs]
+        obs_t    = torch.stack(obs_buf)    # [T, num_envs, n_features]
+        act_t    = torch.stack(act_buf)    # [T, num_envs]
+        rew_t    = torch.stack(rew_buf)    # [T, num_envs]
+        done_t   = torch.stack(done_buf)   # [T, num_envs]
+        logp_t   = torch.stack(logp_buf)   # [T, num_envs]
+        val_t    = torch.stack(val_buf)    # [T, num_envs]
+        logits_t = torch.stack(logits_buf) # [T, num_envs, n_actions]
 
         returns_t, adv_t = compute_gae_buffer(rew_t, val_t, done_t, last_values, gamma, gae_lambda)
 
@@ -144,6 +149,7 @@ def train_ppo(
         logp_flat    = logp_t.view(B)
         returns_flat = returns_t.view(B)
         adv_flat     = adv_t.view(B)
+        logits_flat  = logits_t.view(B, -1)
 
         if use_advantage_norm:
             adv_flat = (adv_flat - adv_flat.mean()) / (adv_flat.std() + adv_eps)
@@ -152,6 +158,7 @@ def train_ppo(
         total_policy_loss = 0.0
         total_value_loss  = 0.0
         total_entropy     = 0.0
+        total_kl          = 0.0
         n_updates = 0
 
         indices = np.arange(B)
@@ -159,11 +166,12 @@ def train_ppo(
             np.random.shuffle(indices)
             for start in range(0, B, batch_size):
                 mb_idx = indices[start:start + batch_size]
-                mb_obs      = obs_flat[mb_idx]
-                mb_act      = act_flat[mb_idx]
-                mb_old_logp = logp_flat[mb_idx]
-                mb_returns  = returns_flat[mb_idx]
-                mb_adv      = adv_flat[mb_idx]
+                mb_obs        = obs_flat[mb_idx]
+                mb_act        = act_flat[mb_idx]
+                mb_old_logp   = logp_flat[mb_idx]
+                mb_returns    = returns_flat[mb_idx]
+                mb_adv        = adv_flat[mb_idx]
+                mb_old_logits = logits_flat[mb_idx]
 
                 dist     = policy.get_dist(mb_obs)
                 new_logp = dist.log_prob(mb_act)
@@ -176,7 +184,13 @@ def train_ppo(
 
                 value_loss = F.mse_loss(value_net(mb_obs), mb_returns)
 
-                loss = policy_loss + value_coef * value_loss - entropy_coef * entropy
+                if beta_kl > 0.0:
+                    old_dist = Categorical(logits=mb_old_logits)
+                    kl = kl_divergence(old_dist, dist).mean()
+                else:
+                    kl = torch.tensor(0.0, device=device)
+
+                loss = policy_loss + value_coef * value_loss - entropy_coef * entropy + beta_kl * kl
                 optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(
@@ -188,11 +202,13 @@ def train_ppo(
                 total_policy_loss += policy_loss.item()
                 total_value_loss  += value_loss.item()
                 total_entropy     += entropy.item()
+                total_kl          += kl.item()
                 n_updates += 1
 
         avg_policy_loss = total_policy_loss / n_updates
         avg_value_loss  = total_value_loss  / n_updates
         avg_entropy     = total_entropy     / n_updates
+        avg_kl          = total_kl          / n_updates
 
         mean_ret = float(np.mean(episode_returns)) if episode_returns else float('nan')
         if mean_ret > best_return:
@@ -205,6 +221,7 @@ def train_ppo(
             'best':     f"{best_return:.1f}",
             'π_loss':   f"{avg_policy_loss:.3f}",
             'V_loss':   f"{avg_value_loss:.3f}",
+            'kl':       f"{avg_kl:.4f}",
         })
 
         if exp_dir is not None:
@@ -215,6 +232,7 @@ def train_ppo(
                 'policy_loss':   round(avg_policy_loss, 6),
                 'value_loss':    round(avg_value_loss, 6),
                 'entropy':       round(avg_entropy, 6),
+                'kl':            round(avg_kl, 6),
                 'ep_return_std': round(float(np.std(episode_returns)), 4) if len(episode_returns) > 1 else 0.0,
                 'ep_return_min': round(float(np.min(episode_returns)), 4) if episode_returns else float('nan'),
                 'ep_return_max': round(float(np.max(episode_returns)), 4) if episode_returns else float('nan'),
@@ -254,6 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("--clip-eps",          type=float, default=0.2)
     parser.add_argument("--entropy-coef",      type=float, default=0.01)
     parser.add_argument("--value-coef",        type=float, default=0.5)
+    parser.add_argument("--beta-kl",           type=float, default=0.0)
     parser.add_argument("--max-grad-norm",     type=float, default=0.5)
     parser.add_argument("--no-advantage-norm", action="store_true")
     parser.add_argument("--hidden-size",       type=int,   default=128)
@@ -292,6 +311,7 @@ if __name__ == "__main__":
         clip_eps=args.clip_eps,
         entropy_coef=args.entropy_coef,
         value_coef=args.value_coef,
+        beta_kl=args.beta_kl,
         max_grad_norm=args.max_grad_norm,
         use_advantage_norm=not args.no_advantage_norm,
         hidden_size=args.hidden_size,

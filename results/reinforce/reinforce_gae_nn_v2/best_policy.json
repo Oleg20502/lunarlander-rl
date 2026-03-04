@@ -1,0 +1,13 @@
+{
+  "checkpoint": "/home/jovyan/avarlamov/skoltech/lunarlander-rl/runs_reinforce/reinforce_gae_nn_v2/best_policy.pt",
+  "n_episodes": 100,
+  "deterministic": false,
+  "device": "cuda",
+  "results": {
+    "mean": 43.52092580918974,
+    "std": 62.403049411078,
+    "min": -174.14330802904075,
+    "max": 147.85913383195836,
+    "success_rate": 0.0
+  }
+}
