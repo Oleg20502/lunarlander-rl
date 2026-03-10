@@ -124,7 +124,7 @@ Implemented in `src/grpo.py`. Like PPO but **without a value network**. At each 
 
 **Group-relative advantage.** For group $g$, let $R^{(g,i)} = \sum_t R_t^{(g,i)}$ be the undiscounted return of episode $i \in \{1,\ldots,G\}$. The group-relative advantage is:
 
-$$\mathcal{A}^{(g,i)} = \frac{R^{(g,i)} - \frac{1}{G}\sum_{j=1}^G R^{(g,j)}}{\text{std}\!\left(R^{(g,1)}, \ldots, R^{(g,G)}\right) + \varepsilon}$$
+$$\mathcal{A}^{(g,i)} = \frac{R^{(g,i)} - \text{mean}\left(R^{(g,1)}, \ldots, R^{(g,G)}\right) }{\text{std}\left(R^{(g,1)}, \ldots, R^{(g,G)}\right) + \varepsilon}$$
 
 This is **constant for every timestep** within episode $(g,i)$: $\mathcal{A}_T^{(g,i)} = \mathcal{A}^{(g,i)}$.
 
