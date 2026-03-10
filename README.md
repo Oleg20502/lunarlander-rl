@@ -98,8 +98,8 @@ Implemented in `src/reinforce.py`. A single `train_reinforce()` function support
 
 | Variant | `--baseline` flag | Description |
 |---------|-------------------|-------------|
-| **Vanilla REINFORCE** | `none` | No baseline; raw Monte-Carlo returns $G_t$ used as advantage. |
-| **NN Value baseline** | `nn` | Learned `ValueNetwork` $V_\phi(s)$ as baseline; advantage $A_t = G_t - V_\phi(s_t)$, no GAE. |
+| **Vanilla REINFORCE** | `none` | No baseline; raw Monte-Carlo returns $G_T$ used as advantage. |
+| **NN Value baseline** | `nn` | Learned `ValueNetwork` $V_\phi(S)$ as baseline; advantage $\mathcal{A}_T = G_T - V_\phi(S_T)$, no GAE. |
 | **GAE without NN** | `gae_no_nn` | GAE with per-timestep batch-averaged returns as value estimate (no learned network). |
 | **GAE + NN** | `gae_nn` | Full GAE ($\lambda = 0.95$) with a learned `ValueNetwork`. |
 
@@ -109,19 +109,36 @@ All variants support entropy regularization (`--entropy-coef`) and advantage nor
 
 Implemented in `src/ppo.py`.
 
-$$L^{\text{CLIP}} = -\mathbb{\hat{E_t}}\left[\min\left(r_t(\theta)\hat{A}_t,\ \text{clip}(r_t(\theta), 1-\varepsilon, 1+\varepsilon)\hat{A}_t\right)\right]$$
+
+$$
+\hat{L}_{\text{PPO-CLIP}} := \mathbb{E}_{T \sim \text{Unif}[0, \tau_b-1]}\left[\min\left(\frac{\pi^{\text{new}}(A_T \mid S_T)}{\pi^{\text{old}}(A_T \mid S_T)} \mathcal{A}^{\pi_{old}}(S_T, A_T),\ \text{clip}_{1-\epsilon}^{1+\epsilon}\left(\frac{\pi^{\text{new}}(A_T \mid S_T)}{\pi^{\text{old}}(A_T \mid S_T)}\right) \mathcal{A}^{\pi_{old}}(S_T, A_T)\right)\right]
+$$
 
 Supports an optional KL-divergence penalty (`--beta-kl`) for additional policy regularization:
 
-$$L = L^{\text{CLIP}} + c_v L^{\text{value}} - c_e H[\pi] + \beta_{\text{KL}} D_{\text{KL}}(\pi_{\text{old}} \| \pi)$$
+$$\hat{L}_{\text{PPO}} = \hat{L}_{\text{PPO-CLIP}} + c_v L^{\text{value}} - c_e H[\pi^{\text{new}}] + \beta_{\text{KL}} D_{\text{KL}}(\pi^{\text{old}} \| \pi^{\text{new}})$$
 
 ### GRPO (Group Relative Policy Optimization)
 
-Implemented in `src/grpo.py`. Like PPO but **without a value network**. For each initial state $s_0$, $G$ complete episodes are sampled from $\pi_{\theta_\text{old}}$. The total (undiscounted) episode returns are normalized **within each group** to form the advantage:
+Implemented in `src/grpo.py`. Like PPO but **without a value network**. At each iteration, `n_groups` groups of `group_size` complete episodes are collected in parallel via a single vectorized environment of size `n_groups × group_size`. All episodes within a group share the same initial state $S_0$ (same seed), making their returns directly comparable.
 
-$$\hat{A}_i = \frac{R_i - \frac{1}{G}\sum_{j=1}^G R_j}{\text{std}(R_1, \ldots, R_G) + \varepsilon}$$
+**Group-relative advantage.** For group $g$, let $R^{(g,i)} = \sum_t R_t^{(g,i)}$ be the undiscounted return of episode $i \in \{1,\ldots,G\}$. The group-relative advantage is:
 
-This advantage is **constant for all timesteps** within episode $i$. All groups run in parallel via a single vectorized environment of size `n_groups × group_size`. Uses the same clipped surrogate objective as PPO.
+$$\mathcal{A}^{(g,i)} = \frac{R^{(g,i)} - \frac{1}{G}\sum_{j=1}^G R^{(g,j)}}{\text{std}\!\left(R^{(g,1)}, \ldots, R^{(g,G)}\right) + \varepsilon}$$
+
+This is **constant for every timestep** within episode $(g,i)$: $\mathcal{A}_T^{(g,i)} = \mathcal{A}^{(g,i)}$.
+
+**Clipped surrogate.** The advantage $\mathcal{A}^{(g,i)}$ is constant within the episode, so the expectation is over groups, episodes, and timesteps jointly:
+
+$$\hat{L}_{\text{GRPO-CLIP}} := \mathbb{E}_{\substack{g \sim [N_g],\; i \sim [G] \\ T \sim \tau^{(g,i)}}}\!\left[\min\!\left(\frac{\pi^{\text{new}}(A_T^{(g,i)} \mid S_T^{(g,i)})}{\pi^{\text{old}}(A_T^{(g,i)} \mid S_T^{(g,i)})}\,\mathcal{A}^{(g,i)},\ \text{clip}_{1-\epsilon}^{1+\epsilon}\!\left(\frac{\pi^{\text{new}}(A_T^{(g,i)} \mid S_T^{(g,i)})}{\pi^{\text{old}}(A_T^{(g,i)} \mid S_T^{(g,i)})}\right)\mathcal{A}^{(g,i)}\right)\right]$$
+
+where $g \sim [N_g]$ denotes a group index sampled uniformly from the $N_g$ groups (`n_groups`), each seeded with a distinct initial state $S_0^{(g)}$; $i \sim [G]$ denotes an episode index sampled uniformly from the $G$ episodes within that group (`group_size`), all starting from $S_0^{(g)}$; and $T \sim \tau^{(g,i)}$ denotes a timestep sampled uniformly from the valid timesteps of episode $(g, i)$. In practice all valid $(g, i, T)$ triples are flattened into a buffer and mini-batched uniformly.
+
+**Total objective** (no value network, no KL penalty):
+
+$$\hat{L}_{\text{GRPO}} = \hat{L}_{\text{GRPO-CLIP}} + c_e\,H[\pi^{\text{new}}]$$
+
+The policy is updated for `n_epochs` passes over the collected data with mini-batches of size `batch_size`.
 
 ---
 
