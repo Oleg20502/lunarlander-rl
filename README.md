@@ -130,7 +130,7 @@ This is **constant for every timestep** within episode $(g,i)$: $\mathcal{A}_T^{
 
 **Clipped surrogate.** The advantage $\mathcal{A}^{(g,i)}$ is constant within the episode, so the expectation is over groups, episodes, and timesteps jointly:
 
-$$\hat{L}_{\text{GRPO-CLIP}} := \mathbb{E}_{\substack{g \sim [N_g],\; i \sim [G] \\ T \sim \tau^{(g,i)}}}\!\left[\min\!\left(\frac{\pi^{\text{new}}(A_T^{(g,i)} \mid S_T^{(g,i)})}{\pi^{\text{old}}(A_T^{(g,i)} \mid S_T^{(g,i)})}\,\mathcal{A}^{(g,i)},\ \text{clip}_{1-\epsilon}^{1+\epsilon}\!\left(\frac{\pi^{\text{new}}(A_T^{(g,i)} \mid S_T^{(g,i)})}{\pi^{\text{old}}(A_T^{(g,i)} \mid S_T^{(g,i)})}\right)\mathcal{A}^{(g,i)}\right)\right]$$
+$$\hat{L}_{\text{GRPO-CLIP}} := \mathbb{E}_{\substack{g \sim [N_g],\; i \sim [G] \\ T \sim \tau^{(g,i)}}}\left[\min\left(\frac{\pi^{\text{new}}(A_T^{(g,i)} \mid S_T^{(g,i)})}{\pi^{\text{old}}(A_T^{(g,i)} \mid S_T^{(g,i)})}\,\mathcal{A}^{(g,i)},\ \text{clip}_{1-\epsilon}^{1+\epsilon}\left(\frac{\pi^{\text{new}}(A_T^{(g,i)} \mid S_T^{(g,i)})}{\pi^{\text{old}}(A_T^{(g,i)} \mid S_T^{(g,i)})}\right)\mathcal{A}^{(g,i)}\right)\right]$$
 
 where $g \sim [N_g]$ denotes a group index sampled uniformly from the $N_g$ groups (`n_groups`), each seeded with a distinct initial state $S_0^{(g)}$; $i \sim [G]$ denotes an episode index sampled uniformly from the $G$ episodes within that group (`group_size`), all starting from $S_0^{(g)}$; and $T \sim \tau^{(g,i)}$ denotes a timestep sampled uniformly from the valid timesteps of episode $(g, i)$. In practice all valid $(g, i, T)$ triples are flattened into a buffer and mini-batched uniformly.
 
