@@ -99,7 +99,7 @@ Implemented in `src/reinforce.py`. A single `train_reinforce()` function support
 | Variant | `--baseline` flag | Description |
 |---------|-------------------|-------------|
 | **Vanilla REINFORCE** | `none` | No baseline; raw Monte-Carlo returns $G_T$ used as advantage. |
-| **NN Value baseline** | `nn` | Learned `ValueNetwork` $V_\phi(S)$ as baseline; advantage $\mathcal{A}_T = G_T - V_\phi(S_T)$, no GAE. |
+| **NN Value baseline** | `nn` | Learned `ValueNetwork` $V_\phi(S)$ as baseline; $\mathcal{A}_T = G_T - V_\phi(S_T)$, no GAE. |
 | **GAE without NN** | `gae_no_nn` | GAE with per-timestep batch-averaged returns as value estimate (no learned network). |
 | **GAE + NN** | `gae_nn` | Full GAE ($\lambda = 0.95$) with a learned `ValueNetwork`. |
 
